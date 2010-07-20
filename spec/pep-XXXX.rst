@@ -153,8 +153,7 @@ a response that can be used to debug the underlying issue::
                 stack = traceback.format_exc().encode("ascii", "ignore")
                 if environ['wsgi.active']():
                     return (500, [(b'Content-Type', b'text/plain')], [stack])
-                else:
-                    environ['wsgi.errors'].write(stack)
+                environ['wsgi.errors'].write(stack)
 
     # Using the middleware with an application
     import my_app
