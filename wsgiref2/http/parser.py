@@ -25,13 +25,13 @@ class RequestParser(object):
             raise StopIteration()
         
         # Discard any unread body of the previous message
-        if self.mesg:
-            data = self.mesg.body.read(8192)
+        if self.request:
+            data = self.request.body.read(8192)
             while data:
-                data = self.mesg.body.read(8192)
+                data = self.request.body.read(8192)
         
         # Parse the next request
-        self.request = HTTPRequest(self.unreader)
+        self.request = Request(self.unreader)
         if not self.request:
             raise StopIteration()
         return self.request

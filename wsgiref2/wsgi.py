@@ -4,6 +4,9 @@
 # See the NOTICE for more information.
 
 import sys
+import traceback
+
+import wsgiref2.util as util
 
 class Request(object):
     def __init__(self, server_address, client_address, socket, httpreq):
@@ -36,9 +39,33 @@ class Request(object):
             name = "http.header.%s" % header.lower()
             self.environ.setdefault(name, []).append(value)
         
-        for val in self.environ["http.header.trailers"]:
+        for val in self.environ.get("http.header.trailers", []):
             if val.strip():
                 self.environ["http.has_trailers"] = True
+
+    def handle(self, app):
+        try:
+            response = app(self.environ)
+            if response is None:
+                return
+            (status, headers, body) = response
+            resp = ["HTTP/%s.%s %s %s" % (self.httpreq.version[0],
+                                        self.httpreq.version[1],
+                                        status,
+                                        util.STATUS_CODES[status])]
+            for name, value in headers:
+                resp.append("%s: %s" % (name, value))
+            resp.extend(["", ""])
+            resp = "\r\n".join(resp)
+            self.socket.send(resp)
+            for item in body:
+                self.socket.send(item)
+        except:
+            tb = traceback.format_exc().encode("ascii", "replace")
+            mesg = "HTTP/1.1 500 Internal Server Error\r\n\r\n%s" % tb
+            self.socket.send(mesg)
+            return False
+        return True
 
     def upgrade(self):
         if self.upgraded:
