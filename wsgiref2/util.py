@@ -3,6 +3,14 @@
 # This file is part of wsgiref2 released under the MIT license. 
 # See the NOTICE for more information.
 
+# Compatibility helpers
+import sys
+
+if sys.version_info < (3, 0):
+    from wsgiref2.py2 import *
+else:
+    from wsgiref2.py3 import *
+
 # Borrowed from httplib.py
 STATUS_CODES = {
     100: 'Continue',
