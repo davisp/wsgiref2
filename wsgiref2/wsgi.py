@@ -14,8 +14,7 @@ class Request(object):
         self.client_address = client_address
         self.socket = socket
         self.httpreq = httpreq
-
-        self.upgraded = False
+        self.started = False
 
         self.environ = {
             "http.method": httpreq.method,
@@ -47,28 +46,33 @@ class Request(object):
         try:
             response = app(self.environ)
             if response is None:
-                return
+                return False
             (status, headers, body) = response
-            resp = ["HTTP/%s.%s %s %s" % (self.httpreq.version[0],
-                                        self.httpreq.version[1],
-                                        status,
-                                        util.STATUS_CODES[status])]
-            for name, value in headers:
-                resp.append("%s: %s" % (name, value))
-            resp.extend(["", ""])
-            resp = "\r\n".join(resp)
-            self.socket.send(resp)
-            for item in body:
-                self.socket.send(item)
+            self.respond(status, headers, body)
         except:
+            if self.started:
+                raise
             tb = traceback.format_exc().encode("ascii", "replace")
-            mesg = "HTTP/1.1 500 Internal Server Error\r\n\r\n%s" % tb
-            self.socket.send(mesg)
-            return False
+            headers = [
+                ("Content-Type", "text/plain"),
+                ("Content-Length", str(len(tb)))
+            ]
+            self.respond(500, headers, [tb])
         return True
 
+    def respond(self, status, headers, body):
+        front = ["HTTP/1.1 %d %s" % (status, util.STATUS_CODES[status])]
+        for name, value in headers:
+            front.append("%s: %s" % (name, value))
+        front.extend(["", ""])
+        self.started = True
+        self.socket.send("\r\n".join(front))
+        for data in body:
+            self.socket.send(data)
+
     def upgrade(self):
-        if self.upgraded:
+        if self.started:
             raise RuntimeError("Already upgraded.")
-        self.upgraded = True
+        self.started = True
         return self.socket
+

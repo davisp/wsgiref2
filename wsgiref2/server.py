@@ -24,16 +24,20 @@ class HTTPServer(object):
         self.sock.listen(self.backlog)
         
     def app(self, environ):
-        return [200, [("Content-Type", "text/plain")], ["Hello, world!\n"]]
+        status = 200
+        body = "Hello, World!\n"
+        headers = [
+            ("Content-Type", "text/plain"),
+            ("Content-Length", str(len(body)))
+        ]
+        return status, headers, body
     
     def run(self):
         while True:
             sock, addr = self.sock.accept()
             try:
-                parser = http.RequestParser(sock)
-                for httpreq in parser:
-                    wsgireq = wsgi.Request(self.address, addr, sock, httpreq)
-                    if not wsgireq.handle(self.app):
+                for req in self.requests(sock, addr):
+                    if not req.handle(self.app):
                         break
             except KeyboardInterrupt:
                 raise
@@ -42,6 +46,14 @@ class HTTPServer(object):
             finally:
                 sock.close()
 
+    def requests(self, socket, address):
+        unreader = http.Unreader(socket)
+        while True:
+            httpreq = http.Request(unreader)
+            wsgireq = wsgi.Request(self.address, address, socket, httpreq)
+            yield wsgireq
+            if httpreq.should_close():
+                break        
 
 def main():
     parser = op.OptionParser(usage=__usage__, option_list=options())
@@ -51,10 +63,9 @@ def main():
         parser.error("Unrecognized arguments: %s" % ", ".join(args))
 
     address = (opts.ip, opts.port)
-    server = HTTPServer(address)
-
+    
     try:
-        server.run()
+        HTTPServer(address).run()
     except KeyboardInterrupt:
         pass
     
