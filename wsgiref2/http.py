@@ -6,13 +6,10 @@
 import os
 import re
 import sys
-import urlparse
 
-try:
-    from cStringIO import StringIO
-except ImportError:
-    from StringIO import StringIO
 
+from wsgiref2.util import b, BufferIO
+import wsgiref2.uri as uri
 
 class ParseError(Exception):
     """\
@@ -35,7 +32,7 @@ class Unreader(object):
     def __init__(self, sock, max_chunk=8192):
         self.sock = sock
         self.max_chunk = max_chunk
-        self.buf = StringIO()
+        self.buf = BufferIO()
     
     def _data(self):
         return self.sock.recv(self.max_chunk)
@@ -49,7 +46,7 @@ class Unreader(object):
             raise TypeError("size parameter must be an int or long.")
         if size == 0:
             return ""
-        if size < 0:
+        if size is None or size < 0:
             size = None
 
         self.buf.seek(0, os.SEEK_END)
@@ -57,6 +54,7 @@ class Unreader(object):
         if size is None and self.buf.tell():
             ret = self.buf.getvalue()
             self.buf.truncate(0)
+            self.buf.seek(0)
             return ret
         if size is None:
             return self._data()
@@ -66,11 +64,13 @@ class Unreader(object):
             if not len(data):
                 ret = self.buf.getvalue()
                 self.buf.truncate(0)
+                self.buf.seek(0)
                 return ret
             self.buf.write(data)
 
         data = self.buf.getvalue()
         self.buf.truncate(0)
+        self.buf.seek(0)
         self.buf.write(data[size:])
         return data[:size]
 
@@ -95,7 +95,7 @@ class LengthReader(object):
         if size == 0:
             return ""
         
-        buf = StringIO()
+        buf = BufferIO()
         data = self.unreader.read()
         while data:
             buf.write(data)
@@ -120,7 +120,7 @@ class ChunkedReader(object):
     def __init__(self, unreader, req):
         self.parser = self.parse_chunked(unreader)
         self.req = req
-        self.buf = StringIO()
+        self.buf = BufferIO()
     
     def read(self, size):
         if not isinstance(size, (int, long)):
@@ -141,11 +141,12 @@ class ChunkedReader(object):
         data = self.buf.getvalue()
         ret, rest = data[:size], data[size:]
         self.buf.truncate(0)
+        self.buf.seek(0)
         self.buf.write(rest)
         return ret
     
     def parse_trailers(self, unreader, data):
-        buf = StringIO()
+        buf = BufferIO()
         buf.write(data)
         
         idx = buf.getvalue().find("\r\n\r\n")
@@ -179,7 +180,7 @@ class ChunkedReader(object):
             (size, rest) = self.parse_chunk_size(unreader, data=rest[2:])          
 
     def parse_chunk_size(self, unreader, data=None):
-        buf = StringIO()
+        buf = BufferIO()
         if data is not None:
             buf.write(data)
 
@@ -220,7 +221,7 @@ class Body(object):
     """
     def __init__(self, reader):
         self.reader = reader
-        self.buf = StringIO()
+        self.buf = BufferIO()
     
     def __iter__(self):
         return self
@@ -250,6 +251,7 @@ class Body(object):
             data = self.buf.getvalue()
             ret, rest = data[:size], data[size:]
             self.buf.truncate(0)
+            self.buf.seek(0)
             self.buf.write(rest)
             return ret
 
@@ -262,6 +264,7 @@ class Body(object):
         data = self.buf.getvalue()
         ret, rest = data[:size], data[size:]
         self.buf.truncate(0)
+        self.buf.seek(0)
         self.buf.write(rest)
         return ret
     
@@ -295,6 +298,7 @@ class Body(object):
         ret, rest = data[:rlen], data[rlen:]
         
         self.buf.truncate(0)
+        self.buf.seek(0)
         self.buf.write(rest)
         return ret
     
@@ -328,15 +332,16 @@ class Request(object):
     def __init__(self, unreader):
         self.unreader = unreader
 
-        self.methre = re.compile("[A-Z0-9$-_.]{3,20}")
-        self.versre = re.compile("HTTP/(\d+).(\d+)")
-        self.hdrre = re.compile("[\x00-\x1F\x7F()<>@,;:\[\]={} \t\\\\\"]")
+        self.methre = re.compile(b("[A-Z0-9$-_.]{3,20}"))
+        self.versre = re.compile(b("HTTP/(\d+).(\d+)"))
+        self.hdrre = re.compile(b("[\x00-\x1F\x7F()<>@,;:\[\]={} \t\\\\\"]"))
 
         self.method = None
         self.uri = None
         self.scheme = None
+        self.userinfo = None
         self.host = None
-        self.port = 80
+        self.port = b("80")
         self.path = None
         self.query = None
         self.fragment = None
@@ -350,64 +355,69 @@ class Request(object):
         self.set_body_reader()
     
     def parse(self, unreader):
-        buf = StringIO()
+        buf = BufferIO()
 
         self._get_data(unreader, buf, stop=True)
         
         # Request line
-        idx = buf.getvalue().find("\r\n")
+        idx = buf.getvalue().find(b("\r\n"))
         while idx < 0:
             self._get_data(unreader, buf)
-            idx = buf.getvalue().find("\r\n")
+            idx = buf.getvalue().find(b("\r\n"))
         self.parse_request_line(buf.getvalue()[:idx])
         rest = buf.getvalue()[idx+2:] # Skip \r\n
         buf.truncate(0)
+        buf.seek(0)
         buf.write(rest)
         
         # Headers
-        idx = buf.getvalue().find("\r\n\r\n")
-        done = buf.getvalue()[:2] == "\r\n"
+        idx = buf.getvalue().find(b("\r\n\r\n"))
+        done = buf.getvalue()[:2] == b("\r\n")
         while idx < 0 and not done:
             self._get_data(unreader, buf)
-            idx = buf.getvalue().find("\r\n\r\n")
-            done = buf.getvalue()[:2] == "\r\n"
+            idx = buf.getvalue().find(b("\r\n\r\n"))
+            done = buf.getvalue()[:2] == b("\r\n")
         if done:
             self.unreader.unread(buf.getvalue()[2:])
-            return ""
+            return b("")
         self.headers = self.parse_headers(buf.getvalue()[:idx])
 
         ret = buf.getvalue()[idx+4:]
         buf.truncate(0)
+        buf.seek(0)
         return ret
 
     def parse_request_line(self, line):
         bits = line.split(None, 2)
         if len(bits) != 3:
-            raise ParseError("Invalid request line. %r" % line.strip())
+            raise ParseError("Invalid request line.")
 
         # Method
         if not self.methre.match(bits[0]):
-            raise ParseError("Invalid request line. Bad method: %r" % bits[0])
+            raise ParseError("Invalid request line. Bad method.")
         self.method = bits[0].upper()
 
         # URI
         self.uri = bits[1]
-        parts = urlparse.urlparse(bits[1])
-        self.scheme = parts.scheme or ''
-        self.host = parts.netloc or None
-        if parts.port is None:
-            self.port = 80
-        else:
-            self.host = self.host.rsplit(":", 1)[0]
-            self.port = parts.port
-        self.path = parts.path or ""
-        self.query = parts.query or ""
-        self.fragment = parts.fragment or ""
+        parts = uri.parse(bits[1])
+        self.scheme = parts["scheme"] or None
+        self.userinfo = parts["userinfo"] or None
+        self.host = parts["host"] or None
+        if not parts["port"]:
+            if self.scheme == b("http"):
+                self.port = b("80")
+            elif self.scheme == b("https"):
+                self.port = b("443")
+            else:
+                self.port = None
+        self.path = parts["path"] or None
+        self.query = parts["query"] or None
+        self.fragment = parts["fragment"] or None
 
         # Version
         match = self.versre.match(bits[2])
         if match is None:
-            raise ParseError("Invalid HTTP version: %r" % bits[2])
+            raise ParseError("Invalid HTTP version.")
         self.version = (int(match.group(1)), int(match.group(2)))
 
     def parse_headers(self, data):
@@ -416,10 +426,10 @@ class Request(object):
         # Split lines on \r\n keeping the \r\n on each line
         lines = []
         while len(data):
-            pos = data.find("\r\n")
+            pos = data.find(b("\r\n"))
             if pos < 0:
                 lines.append(data)
-                data = ""
+                data = b("")
             else:
                 lines.append(data[:pos+2])
                 data = data[pos+2:]
@@ -429,18 +439,18 @@ class Request(object):
         while len(lines):
             # Parse initial header name : value pair.
             curr = lines.pop(0)
-            if curr.find(":") < 0:
+            if curr.find(b(":")) < 0:
                 raise ParseError("Invalid header. No colon separator found.")
-            name, value = curr.split(":", 1)
-            name = name.rstrip(" \t").upper()
+            name, value = curr.split(b(":"), 1)
+            name = name.rstrip(b(" \t")).upper()
             if self.hdrre.search(name):
-                raise ParseError("Invalid header. Invalid bytes: %r" % name)
+                raise ParseError("Invalid header. Invalid bytes.")
             name, value = name.strip(), [value.lstrip()]
             
             # Consume value continuation lines
-            while len(lines) and lines[0].startswith((" ", "\t")):
+            while len(lines) and lines[0].startswith((b(" "), b("\t"))):
                 value.append(lines.pop(0))
-            value = ''.join(value).rstrip()
+            value = b("").join(value).rstrip()
             
             headers.append((name, value))
         return headers
@@ -450,14 +460,14 @@ class Request(object):
         clength = 0
 
         for (name, value) in self.headers:
-            if name.lower() == "content-length":
+            if name.lower() == b("content-length"):
                 try:
                     clength = int(value)
                 except ValueError:
                     clength = 0
-            elif name.lower() == "transfer-encoding":
-                chunked = value.lower() == "chunked"
-            elif name.lower() == "sec-websocket-key1":
+            elif name.lower() == b("transfer-encoding"):
+                chunked = value.lower() == b("chunked")
+            elif name.lower() == b("sec-websocket-key1"):
                 clength = 8
 
         if chunked:
@@ -467,10 +477,10 @@ class Request(object):
 
     def should_close(self):
         for (h, v) in self.headers:
-            if h.lower() == "connection":
-                if v.lower().strip() == "close":
+            if h.lower() == b("connection"):
+                if v.lower().strip() == b("close"):
                     return True
-                elif v.lower().strip() == "keep-alive":
+                elif v.lower().strip() == b("keep-alive"):
                     return False
         return self.version <= (1, 0)
 

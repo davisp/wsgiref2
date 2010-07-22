@@ -130,14 +130,23 @@ patterns = [
     absolute_uri.compile()
 ]
 
-print absolute_uri.render()
-
 def parse(value):
+    ret = {
+        "scheme": None,
+        "userinfo": None,
+        "host": None,
+        "port": None,
+        "path": None,
+        "query": None,
+        "fragment": None
+    }
     if value == b("*"):
-        return {b("star"): b("*")}
+        ret["path"] = b("*")
+        return ret
     for pat in patterns:
         match = pat.match(value)
         if match:
-            return match.groupdict()
-    raise ValueError(b"Invalid HTTP URI: " + value)
+            ret.update(match.groupdict())
+            return ret
+    raise ValueError(b("Invalid HTTP URI: ") + value)
 

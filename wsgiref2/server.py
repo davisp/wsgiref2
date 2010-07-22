@@ -11,6 +11,8 @@ import wsgiref2.http as http
 import wsgiref2.util as util
 import wsgiref2.wsgi as wsgi
 
+from wsgiref2.util import b
+
 __usage__ = "usage: %prog [OPTIONS]"
 
 class HTTPServer(object):
@@ -25,12 +27,12 @@ class HTTPServer(object):
         
     def app(self, environ):
         status = 200
-        body = "Hello, World!\n"
+        body = b("Hello, World!\n")
         headers = [
-            ("Content-Type", "text/plain"),
-            ("Content-Length", str(len(body)))
+            (b("Content-Type"), b("text/plain")),
+            (b("Content-Length"), b(str(len(body))))
         ]
-        return status, headers, body
+        return status, headers, [body]
     
     def run(self):
         while True:
