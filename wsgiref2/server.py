@@ -4,6 +4,7 @@
 # See the NOTICE for more information.
 
 import optparse as op
+import pprint
 import socket
 import traceback
 
@@ -27,7 +28,7 @@ class HTTPServer(object):
         
     def app(self, environ):
         status = 200
-        body = b("Hello, World!\n")
+        body = pprint.pformat(environ).encode('latin-1')
         headers = [
             (b("Content-Type"), b("text/plain")),
             (b("Content-Length"), b(str(len(body))))

@@ -1,3 +1,27 @@
+"""\
+Since the standard library doesn't allow byte strings to be used
+with the urllib.parse module I went and implemented a parser thinger
+based on RFC 2396 which RFC 2616 references.
+
+This isn't an exactly conformant parser. I've removed the classes
+related to opaque values for URI's and I'm a bit looser to allow
+things like quotes and angle brackets in query strings.
+
+There's a consolidated EBNF grammar towards the bottom of RFC 2396
+that I found extremely helpful while writing this.
+
+Relevant RFC's:
+    http://www.ietf.org/rfc/rfc2396.txt
+    http://www.ietf.org/rfc/rfc2616.txt
+
+* Note that RFC 2616 is specific about which classes can appear
+in an HTTP URI. Its defined as something like:
+
+    "*" | absolute_URI | absolute_path | authority
+
+* Note to self: add page numbers for RFC references.
+"""
+
 
 import re
 import traceback
@@ -90,12 +114,12 @@ escaped         = And(Li("%"), hexchar, hexchar)
 mark            = CC("-_.!~*'()")
 unreserved      = Or(alphanum, mark)
 reserved        = CC(";/?:@&=+$,")
-uric            = Or(reserved, unreserved, escaped)
+uric            = Or(reserved, unreserved, escaped, CC("\"'<>"))
 fragment        = Rep(uric, name="fragment")
 uri_fragment    = And(Li("#"), fragment)
 query           = Rep(uric, name="query")
 query_string    = And(Li("\?"), query)
-pchar           = Or(unreserved, escaped, CC(":@&=+$,"))
+pchar           = Or(unreserved, escaped, CC(":@&=+$,'\""))
 param           = Rep(pchar)
 segment         = And(Rep(pchar), Rep(And(Li(";"), param)))
 path_segments   = And(segment, Rep(And(Li("/"), segment)))
@@ -124,9 +148,15 @@ absolute_uri    = And(
                     Opt(uri_fragment),
                     name="raw"
                 )
+abs_path_uri    = And(
+                    abs_path,
+                    Opt(query_string),
+                    Opt(uri_fragment),
+                    name="raw"
+                )
 
 patterns = [
-    abs_path.compile(),
+    abs_path_uri.compile(),
     absolute_uri.compile()
 ]
 
