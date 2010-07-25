@@ -21,25 +21,26 @@ An example of a good feature idea that would be best left to middleware are
 the logging facilities introduced by Rack. They provide "log.error",
 "log.critical", (etc..) keys in the environ to provide a standardized method
 for application logging. This feature could be implemented strictly as a
-middleware, and hence I think does not belong in this specification.
+middleware, and hence does not belong in this specification.
 
 
 The WSGI Interface
 ==================
 
 In a nutshell, this specification revolves around a simple method for handling
-HTTP requests and generating HTTP requests. The basic application is a simple
+HTTP requests and generating HTTP responses. The basic application is a simple
 callable that accepts a single parameter that describes the request and returns
 a three-tuple that describes the response. All values referred to in this
 document are assumed to be the most direct equivalent for a given interpreter.
 
+
 A Simple Example
 ----------------
 
-CPython 2.6::
+CPython 2.5::
 
     def application(environ):
-        status = 200
+        status = "200 OK"
         headers = [("Content-Type", "text/plain")]
         body = "Hello, world!\n"
         return status, headers, [body]
@@ -47,7 +48,7 @@ CPython 2.6::
 CPython 3.1::
 
     def application(environ):
-        status = 200
+        status = b"200 OK"
         headers = [(b"Content-Type", b"text/plain")]
         body = b"Hello, world!\n"
         return status, headers, [body]
@@ -55,6 +56,13 @@ CPython 3.1::
 Obviously, variable names are not part of the specification. The current names
 are only used to be illustrative of their intent and to have a common name
 by which we can refer to them.
+
+.. note::
+
+    CPython 2.6 and 2.7 should be able to use either format because of the
+    following condtion::
+
+        >>> type(b"") is type("")
 
 The environ dict
 ----------------
@@ -92,23 +100,30 @@ HTTP Related
 All HTTP values must be raw byte values. These values are pulled off a socket
 and may end up being sent to another socket. Unfortunately, HTTP predates much
 of the push for character encodings. Some may point that it specifies using
-latin-1 encoding in most places but I would point out that people do weird
-thigns with HTTP. As much as I would love to take a hardline on encodings, I
+latin-1 encoding in most places but I would argue that people do weird
+things with HTTP. As much as I would love to take a hardline on encodings, I
 am unable to justify specifying latin-1 when clients may ignore this and some
 application developers will be expected to handle such bad clients.
 
   * http.method - Request method (bytes)
+
   * http.uri.raw - The original unmodified request URI. (bytes)
+  
   * http.uri.path - The path part of the request URI. (bytes)
+  
   * http.uri.query_string - The query string part of the request URI (bytes)
+  
   * http.version - The HTTP protocol version specified in the request.
     (two-tuple of integers)
+  
   * http.headers - A dict of lists. keys are header names. Values are lists
     of header values. Most often these lists will have a length of one, but
     HTTP specifies that headers can be repeated. As such our representation
     should reflect this fact. (keys are bytes, values are lists of bytes)
+  
   * http.trailers - A dict of lists. Keys are trailer names and values are
     lists of trailer values. (keys are bytes, values are lists of bytes)
+  
   * http.body - A readable stream that provides any data that was sent with
     the request. This stream *must* respect the HTTP protocol in the data
     it provides. For instance, it must respect content-length, transfer-
@@ -123,42 +138,53 @@ server that cannot be derived from the request.
 
   * wsgi.version - The tuple (2, 0) if the server complies with this
     specification.
+
   * wsgi.url_scheme - The original URL scheme used to make this request so
     applications can generate correct links to other resources it controls.
     Should generally be "http" or "https". (bytes)
+
   * wsgi.script_name - Servers invoking a WSGI application often reserve a
     section of its URI path hierarchy for request dispatching. Ie, if a server
     is hosting two WSGI applications, one application my get requests that have
     a paths matching "/foo.*" while the other application may get requests
-    matching "/bar.*". "wsgi.path" can be used to inform the application of
-    this path information so that it can generate URLs that will be compatible
-    with differing path configurations. (bytes)
+    matching "/bar.*". "wsgi.script_nmae" can be used to inform the application
+    of this path information so that it can generate URLs that will be
+    compatible with differing path configurations. (bytes)
+
   * wsgi.multithread - If the application must handle running in an execution
     environment where application code may be called simultaneously from
     multiple threads. (True or False)
+
   * wsgi.multiprocess - An indication if the application must handle running
     in an execution environment where application code may be called
     simultaneously from multiple processes. (True or False)
+
   * wsgi.errors - A stream available for application logging. (ie, it must
     be writable). (Writable stream)
+
   * wsgi.upgrade - A callable that returns an object that represents the raw
     socket connection. This mechanism will replace the start_response callable
     and allow applications to remove the current request from the normal HTTP
     processing loop. (callable that takes no parameters and returns an upgrade
     stream)
+
   * wsgi.upgraded - A callable that returns a boolean specifying if the
     connection has been upgraded or not. This should be used by middleware
     that create responses (ie, error handling middleware) to determine if
-    the exception should be intercepted. If this returns False, the exception
+    the exception should be intercepted. If this returns True, the exception
     should be re-raised so that the server can log the error and clean up
     the connection.
+
   * conn.server_name - They name of the server that the application may wish
     to provide to the application. If there is a "Host" header in the HTTP
-    request, this value should reflect that value. (bytes)
+    request, this should reflect that value. (bytes)
+
   * conn.server_port - The port of the socket that the server is listening
     on. If the Host header is present with a specified port, this value
     should reflect that. (int)
+
   * conn.remote_ip - The IP address of the remote HTTP client. (bytes)
+  
   * conn.remote_port - The port of the remote HTTP client. (int)
 
 
@@ -193,14 +219,17 @@ The body readable stream must support the following methods:
     the request body, this function should return an empty string. All values
     returned from this function must be of the bytes type specified by the
     current interpreter. No character decoding should be applied.
+
   * readline(size) - Provides the same semantics as read(size) but will also
     limit the data returned to the next newline "\n" character in the request
     body. Unlike WSGI v1.0, the size parameter is requierd to be supported.
     When no more data remains, the empty byte object should be returned.
+  
   * readlines([size]) - Return all remaining lines in the request body as a
     list of byte objects. The optional size argument is only specified so that
     the body object matches the built-in file object API. When no more bytes
     are left in the request body, the empty bytes object should be returned.
+  
   * __iter__() - Should yield all strings remaining in the request body. When
     no more data exists in the request body, an iterator that yields zero
     values should be returned.
@@ -216,8 +245,8 @@ size and iterable for reading requests that were sent with a chunked transfer-
 encoding so that apps can proxy chunked requests nearly exactly? Theoretically
 an HTTP endpoint that relies on the semantics of such things is mis-behaving,
 but its a possibility of specing something out of the realm of possibility.
-Granted, most HTTP parsers do not support chunk length parameters, which I
-believe is not something that should be in the spec.]
+Granted, most HTTP parsers do not support chunk length parameters, which
+probably should not be in this spec.]
 
 
 The "wsgi.errors" Writable Stream
@@ -227,8 +256,10 @@ This error stream is intended for use in a logging system. It must support
 enough of the file API to be used with the standard library `logging` module.
 
   * write(value) - Write the byte represented by value to the stream.
+  
   * writelines(seq) - Iterate over `seq` writing each yieled bytes value
     to the underlying stream.
+  
   * flush() - Ensure that any data has been sent through to the underlying
     stream. It is possible that this is a no-op depending on implementation. It
     should merely allow applications to ensure that some data has been logged.
@@ -244,12 +275,16 @@ and should support the following methods:
   * recv(size) - Retrieve at most size bytes from the underlying connection.
     If size is not specified, negative, or None, it should return any available
     data or block until data becomes available.
+  
   * send(value) - Send the bytes object value to the client immediately. The
     server should not attempt to buffer data. Servers should be careful to
     comply with this condition even if they are using TCP options like
     TCP_CORK or TCP_NOPUSH.
+  
   * sendall(data) - Send all bytes in data? Should I smush this with send?
+  
   * makefile() - Should I specify this?
+  
   * setblocking() - Should I specify this?
 
 
@@ -296,7 +331,7 @@ Status Code
 
 That staus code should be a byte object that represents an HTTP status code
 and the associated status message. This should match the regular expression:
-r"^[1-9]\d\d\s+\w+$".
+r"^[1-9]\d\d[ ]+[A-Za-z][A-Za-z ]+$".
 
 
 Response Headers
@@ -319,10 +354,14 @@ yields byte objects that will be forwarded to the client.
 Server Handling of the Response
 -------------------------------
 
-When the server receives the response three-tuple it should prepare the HTTP
-response for the client by formatting the status code and headers. This data
-should not be sent to the client until the body iterator yields its first
-value so that errors can be handled until the last possible moment.
+A server should not attempt to send any data to a client until the first value
+is accessed from the iterator. This will allow for the maximum amount of time
+to be able to report any errors.
+
+Once the server starts sending data it will not be possible to recover the
+connection. In this situation the server should close the client connection
+and report the error out of band in a server log or via some other
+implementation defined manner.
 
 A WSGI server should attempt to ensure that the HTTP response complies with
 the HTTP protocol. For instance, if an application returns an response
@@ -346,20 +385,20 @@ is to prevent too much information leakage to possibly nefarious clients.
 
 A server should also consider whether a request has been partially sent to the
 client when handling errors. If a request has already been started and no
-error message can be sent, the server should close the terminate the current
+error message can be sent, the server should close terminate the current
 response and underlying connection and then notify the application developer
 with some other out of band communication (ie, a server error log). A
 connection that has been upgraded should be considered as started (regardless
-if any data has been sent to the client [ed, double check on this caveat]).
+if any data has been sent to the client [ed: double check on this caveat]).
 
 
 Guidelines for Middleware
 =========================
 
-Any application may at its discretion invoke another WSGI application to
-handle a request. In this situation the original application is referred to
-as a middleware by convention. This is often done to provide functionality
-such as routing, response compression, authentication, sessions, etc.
+When an application is preparing a response it is likely and common that it
+will call a second application as part of this processing. Applications that
+defer to sub-applications are known as "middleware". Common uses of middleware
+include routing, response compression, authentication, or session management.
 
 All middlware must obey they requirements of the server (minus the prohibition
 on request/respones modifications) as well as requirements of applications
@@ -381,13 +420,15 @@ transparently as it is responsible for direct socket access and thus the best
 place to handle this logic. There are three valid methods for handling this
 behavior listed below in order from best to worst:
 
-* When an application attempts to read data from the client, send the
-  "HTTP/1.1 100 Continue\r\n\r\n" response before reading data.
-* Immediately send the "HTTP/1.1 100 Continue\r\n\r\n" response before invoking
-  the WSGI application
-* Do nothing and wait for the client to timeout and send the body on its own.
-  This is very undesirable because the client may wait many seconds before
-  timing out.
+  * When an application attempts to read data from the client, send the
+    "HTTP/1.1 100 Continue\r\n\r\n" response before reading data.
+
+  * Immediately send the "HTTP/1.1 100 Continue\r\n\r\n" response before
+    invoking the WSGI application
+
+  * Do nothing and wait for the client to timeout and send the body on its own.
+    This is very undesirable because the client may wait many seconds before
+    timing out.
 
 
 Trailers
@@ -405,25 +446,31 @@ writing too much code for it I am waiting for feedback.
 Notes
 -----
 
-* CGI compliance is not good enough. Most of the complaints I have seen
-  revolve around the lack of HTTP compliance.
-* The major motivation for decision making should be to give applications the
-  ability to have complete control of the HTTP protocol. The WSGI spec should
-  merely serve to provide a standardized interface to the interaction to
-  decouple server and app code.
-* The original outline of a function that creates an HTTP response given
-  a description of the request has proven to be popular.
-* Other languages implementing WSGI inspired systems have universally done
-  away with the start_response callable. This is a good idea as it reduces
-  the complexity of the specification substantially.
-* Character encoding issues are a pain in the rear. The WSGI spec is not the
-  place to make a decision on this issue because it is application specific.
-  Although, specifying a standard way to access various parts of the request
-  may provide recommendations on character decoding.
-* The keys in an environ dict should be considered metadata that point at
-  subsections of the request. It was a mistake to have HTTP_$(HEADER_NAME)
-  semantics as this blurs the line between data and metadata.
-* The original specification made a good decision in limiting the
-  spec to only using builtin types. This simplifies the implementation greatly
-  for other interpreters and implementations using the C-API.
+  * CGI compliance is not good enough. Most of the complaints I have seen
+    revolve around the lack of HTTP compliance.
+
+  * The major motivation for decision making should be to give applications the
+    ability to have complete control of the HTTP protocol. The WSGI spec should
+    merely serve to provide a standardized interface to the interaction to
+    decouple server and app code.
+
+  * The original outline of a function that creates an HTTP response given
+    a description of the request has proven to be popular.
+
+  * Other languages implementing WSGI inspired systems have universally done
+    away with the start_response callable. This is a good idea as it reduces
+    the complexity of the specification substantially.
+
+  * Character encoding issues are a pain in the rear. The WSGI spec is not the
+    place to make a decision on this issue because it is application specific.
+    Although, specifying a standard way to access various parts of the request
+    may provide recommendations on character decoding.
+
+  * The keys in an environ dict should be considered metadata that point at
+    subsections of the request. It was a mistake to have HTTP_$(HEADER_NAME)
+    semantics as this blurs the line between data and metadata.
+
+  * The original specification made a good decision in limiting the
+    spec to only using builtin types. This simplifies the implementation
+    greatly for other interpreters and implementations using the C-API.
 
