@@ -15,33 +15,58 @@ class Request(object):
         self.socket = socket
         self.httpreq = httpreq
         self.started = False
+        self.upgraded = False
+
+        url_scheme = "http"
+        script_name = ""
+
+        for name, value in httpreq.headers:
+            name = name.strip().lower()
+            value = value.strip()
+            if name == "host":
+                parts = value.split(":", 1)
+                server_address[0] = parts[0]
+                if len(parts) > 1:
+                    server_address[1] = int(parts[1])
+            elif name == "x-forwarded-protocol" and value.lower() == "ssl":
+                url_scheme = "https"
+            elif name == "x-forwarded-ssl" and value.lower() == "on":
+                url_scheme = "https"
+            elif name == "x-script-name":
+                script_name = value
+            elif name == "expect" and value.lower() == "100-continue":
+                httpreq.body.set_pre_read(self.pre_read)
+            elif name == "transfer-encoding" and value.lower() == "chunked":
+                self.body.set_trailer_handler(self.handle_trailers)
 
         self.environ = {
-            b("http.method"): httpreq.method,
-            b("http.uri.raw"): httpreq.uri,
-            b("http.uri.scheme"): httpreq.scheme,
-            b("http.uri.userinfo"): httpreq.userinfo,
-            b("http.uri.host"): httpreq.host,
-            b("http.uri.port"): httpreq.port,
-            b("http.uri.path"): httpreq.path,
-            b("http.uri.query_string"): httpreq.query,
-            b("http.uri.fragment"): httpreq.fragment,
-            b("http.version"): httpreq.version,
-            b("http.has_trailers"): False,
-            b("http.body"): httpreq.body,
-            b("wsgi.errors"): sys.stderr,
-            b("wsgi.multithread"): False,
-            b("wsgi.multiprocess"): False,
-            b("wsgi.upgrade"): self.upgrade
+            "wsgi.version": (2, 0),
+            "wsgi.uri_scheme": url_scheme,
+            "wsgi.path": "",
+            "wsgi.multithread": False,
+            "wsgi.multiprocess": False,
+            "wsgi.upgrade": self.upgrade,
+            "wsgi.upgraded": lambda: self.upgraded,
+            "wsgi.errors": sys.stderr,
+
+            "conn.server_name": server_address[0],
+            "conn.server_port": server_address[1],
+            "conn.remote_addr": client_address[0],
+            "conn.remote_port": client_address[1],
+
+            "http.method": httpreq.method
+            "http.uri.raw": httpreq.uri,
+            "http.uri.path": httpreq.path,
+            "http.uri.query_string": httpreq.query_string
+            "http.version": httpreq.version,
+            "http.headers": {},
+            "http.trailers": {},
+            "http.body": httpreq.body
         }
         
-        for (header, value) in httpreq.headers:
-            name = b("http.header.") + header.lower()
-            self.environ.setdefault(name, []).append(value)
-        
-        for val in self.environ.get(b("http.header.trailers"), []):
-            if val.strip():
-                self.environ[b("http.has_trailers")] = True
+        for (name, value) in httpreq.headers:
+            name, value = name.strip.lower(), value.strip()
+            self.environ["http.headers"].setdefault(name, []).append(value)
 
     def handle(self, app):
         try:
@@ -71,9 +96,18 @@ class Request(object):
         for data in body:
             self.socket.send(data)
 
+    def pre_read(self):
+        self.socket.send("HTTP/1.1 100 Continue\r\n\r\n")
+
+    def handle_trailers(self, trailers):
+        for name, value in trailers:
+            name, value = name.strip().lower(), value.strip()
+            self.environ["http.trailers"].setdefault(name, []).append(value)
+
     def upgrade(self):
         if self.started:
             raise RuntimeError("Already upgraded.")
         self.started = True
+        self.upgraded = True
         return self.socket
 

@@ -121,7 +121,13 @@ class ChunkedReader(object):
         self.parser = self.parse_chunked(unreader)
         self.req = req
         self.buf = BufferIO()
-    
+        self.trailer_handler = None
+
+    def set_trailer_handler(self, func):
+        if not callable(func):
+            raise TypeError("Trailer handler must be callable.")
+        self.trailer_handler = func
+
     def read(self, size):
         if not isinstance(size, (int, long)):
             raise TypeError("size must be an integral type")
@@ -159,6 +165,8 @@ class ChunkedReader(object):
             unreader.unread(buf.getvalue()[2:])
             return ""
         self.req.trailers = self.req.parse_headers(buf.getvalue()[:idx])
+        if self.trailer_handler is not None:
+            self.trailer_handler(self.req.trailers)
         unreader.unread(buf.getvalue()[idx+4:])
 
     def parse_chunked(self, unreader):
@@ -177,7 +185,7 @@ class ChunkedReader(object):
                 rest += unreader.read()
             if rest[:2] != '\r\n':
                 raise ParseError("Chunk is missing the \\r\\n terminator.")
-            (size, rest) = self.parse_chunk_size(unreader, data=rest[2:])          
+            (size, rest) = self.parse_chunk_size(unreader, data=rest[2:]) 
 
     def parse_chunk_size(self, unreader, data=None):
         buf = BufferIO()
@@ -222,7 +230,16 @@ class Body(object):
     def __init__(self, reader):
         self.reader = reader
         self.buf = BufferIO()
+        self.pre_read = None
     
+    def set_pre_read(self, func):
+        if not callable(func):
+            raise TypeError("func must be callable.")
+        self.pre_read = func
+
+    def set_trailers_handler(self, func):
+        self.reader.set_trailers_handler(func)
+
     def __iter__(self):
         return self
     
@@ -256,7 +273,7 @@ class Body(object):
             return ret
 
         while size > self.buf.tell():
-            data = self.reader.read(1024)
+            data = self._get_data()
             if not len(data):
                 break
             self.buf.write(data)
@@ -275,7 +292,7 @@ class Body(object):
         
         idx = self.buf.getvalue().find("\n")
         while idx < 0:
-            data = self.reader.read(1024)
+            data = self._get_data(1024)
             if not len(data):
                 break
             self.buf.write(data)
@@ -327,6 +344,12 @@ class Body(object):
         elif size < 0:
             return sys.maxint
         return size
+
+    def _get_data(self):
+        if self.pre_read is not None:
+            self.pre_read()
+            self.pre_read = None
+        return self.reader.read(1024)
 
 class Request(object):
     def __init__(self, unreader):
